@@ -228,6 +228,13 @@
       master.gain.setTargetAtTime(0, ctx.currentTime, .15);
       setTimeout(() => { if (!playing) ctx.suspend(); }, 700);
     },
+    // Mikrofon tinglayotganda musiqa (ayniqsa kick) puflash deb qabul qilinmasin.
+    duck(on) {
+      const v = on ? .12 : 1;
+      if (introEl && !introDone) introEl.volume = v;
+      if (audioEl) audioEl.volume = v;
+      if (ctx && timer && playing) master.gain.setTargetAtTime(on ? .08 : .6, ctx.currentTime, .1);
+    },
     toggle() { playing ? this.pause() : this.start(); return playing; },
   };
 

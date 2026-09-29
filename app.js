@@ -36,36 +36,40 @@
   $$(".split").forEach(splitChars);
 
   // ── Yulduzli osmon ───────────────────────────────────
+  // Osmon 1x piksel zichlikda va ~30 fps da chiziladi: yulduzlar mayda, farqi
+  // ko'rinmaydi, lekin telefon GPU'siga yuk 4–8 barobar kam.
   const sky = $("#sky"), sctx = sky.getContext("2d");
-  let stars = [], shooting = [];
+  const SDPR = 1;
+  let stars = [], shooting = [], skyOdd = false;
   function sizeSky() {
-    sky.width = innerWidth * DPR; sky.height = innerHeight * DPR;
+    sky.width = innerWidth * SDPR; sky.height = innerHeight * SDPR;
     const n = mobile ? 110 : 220;
     stars = Array.from({ length: n }, () => ({
       x: Math.random() * sky.width, y: Math.random() * sky.height,
-      r: (Math.random() * 1.3 + .3) * DPR, p: Math.random() * Math.PI * 2, s: Math.random() * .02 + .005,
+      r: Math.random() * 1.3 + .4, p: Math.random() * Math.PI * 2, s: Math.random() * .02 + .005,
     }));
   }
   function drawSky() {
+    requestAnimationFrame(drawSky);
+    if ((skyOdd = !skyOdd)) return;
     sctx.clearRect(0, 0, sky.width, sky.height);
+    sctx.fillStyle = "#fff";
     for (const s of stars) {
-      s.p += s.s;
+      s.p += s.s * 2;
       sctx.globalAlpha = .35 + Math.sin(s.p) * .35;
-      sctx.fillStyle = "#fff";
-      sctx.beginPath(); sctx.arc(s.x, s.y, s.r, 0, 7); sctx.fill();
+      sctx.fillRect(s.x, s.y, s.r, s.r);
     }
     if (Math.random() < .006) shooting.push({ x: Math.random() * sky.width, y: Math.random() * sky.height * .4, l: 1 });
     shooting = shooting.filter((m) => m.l > 0);
     for (const m of shooting) {
       sctx.globalAlpha = m.l;
-      const g = sctx.createLinearGradient(m.x, m.y, m.x - 120 * DPR, m.y - 50 * DPR);
+      const g = sctx.createLinearGradient(m.x, m.y, m.x - 120, m.y - 50);
       g.addColorStop(0, "#fff"); g.addColorStop(1, "transparent");
-      sctx.strokeStyle = g; sctx.lineWidth = 2 * DPR;
-      sctx.beginPath(); sctx.moveTo(m.x, m.y); sctx.lineTo(m.x - 120 * DPR, m.y - 50 * DPR); sctx.stroke();
-      m.x += 14 * DPR; m.y += 6 * DPR; m.l -= .025;
+      sctx.strokeStyle = g; sctx.lineWidth = 2;
+      sctx.beginPath(); sctx.moveTo(m.x, m.y); sctx.lineTo(m.x - 120, m.y - 50); sctx.stroke();
+      m.x += 28; m.y += 12; m.l -= .05;
     }
     sctx.globalAlpha = 1;
-    requestAnimationFrame(drawSky);
   }
   sizeSky(); drawSky();
   addEventListener("resize", sizeSky);
@@ -84,15 +88,27 @@
   }
 
   // ── Konfetti ─────────────────────────────────────────
-  const confetti = window.confetti || (() => {});
+  // Konfetti o'z canvas'ida va Web Worker'da chiziladi (OffscreenCanvas bo'lmasa
+  // kutubxona o'zi oddiy rejimga qaytadi) — animatsiyalar bilan to'qnashmaydi.
+  let confetti = () => {};
+  if (window.confetti) {
+    const cc = document.createElement("canvas");
+    cc.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:70";
+    document.body.appendChild(cc);
+    confetti = window.confetti.create(cc, { resize: true, useWorker: true, disableForReducedMotion: true });
+  }
+  const PK = mobile ? .6 : 1; // telefonda zarrachalar soni
   function burst(x = .5, y = .6, power = 1) {
-    confetti({ particleCount: Math.round(140 * power), spread: 90, startVelocity: 45 * power, origin: { x, y }, colors: COLORS, scalar: 1.1 });
+    confetti({ particleCount: Math.round(140 * power * PK), spread: 90, startVelocity: 45 * power, origin: { x, y }, colors: COLORS, scalar: 1.1 });
   }
   function sideCannons(ms = 2500) {
-    const end = Date.now() + ms;
+    const end = Date.now() + ms * (mobile ? .75 : 1);
+    let odd = false;
     (function frame() {
-      confetti({ particleCount: 4, angle: 60, spread: 60, origin: { x: 0, y: .75 }, colors: COLORS });
-      confetti({ particleCount: 4, angle: 120, spread: 60, origin: { x: 1, y: .75 }, colors: COLORS });
+      if ((odd = !odd)) {
+        confetti({ particleCount: mobile ? 3 : 5, angle: 60, spread: 60, origin: { x: 0, y: .75 }, colors: COLORS });
+        confetti({ particleCount: mobile ? 3 : 5, angle: 120, spread: 60, origin: { x: 1, y: .75 }, colors: COLORS });
+      }
       if (Date.now() < end) requestAnimationFrame(frame);
     })();
   }
@@ -331,46 +347,124 @@
   function blowOut() {
     if (blown) return;
     blown = true;
-    candles.forEach((c, i) => setTimeout(() => c.classList.add("out"), i * 250));
+    stopListening();
+    candles.forEach((c, i) => setTimeout(() => { c.classList.add("out"); c.style.removeProperty("--blow"); }, i * 250));
     $("#blowBtn").disabled = true; $("#micBtn").disabled = true;
     $("#cakeLead").textContent = "Orzuing albatta ushaladi! 🌠";
-    setTimeout(() => {
-      burst(.5, .5, 1.4); sideCannons(3000);
-      startFireworks();
-      setTimeout(() => $("#final").scrollIntoView({ behavior: "smooth" }), 1400);
-    }, 600);
+    // Og'ir effektlar ketma-ket: avval konfetti, keyin yon to'plar, scroll esa
+    // konfetti bosilgandan keyin — hammasi bir kadrga tushib qotirmasin.
+    setTimeout(() => burst(.5, .5, 1.3), 500);
+    setTimeout(() => sideCannons(2200), 900);
+    setTimeout(() => $("#final").scrollIntoView({ behavior: "smooth" }), 2600);
   }
   $("#blowBtn").addEventListener("click", blowOut);
 
-  $("#micBtn").addEventListener("click", async () => {
-    const btn = $("#micBtn");
+  // ── Puflab o'chirish (mikrofon) ──────────────────────
+  // Puflash — past chastotalarda (50–500 Hz) keng shovqin. Avval 0.4 s xona
+  // shovqini o'lchanadi, keyin undan ~14 dB baland past-chastota energiyasi
+  // "puflash" hisoblanadi; har sham ma'lum vaqt puflashdan keyin o'chadi.
+  const micBtn = $("#micBtn"), meter = $("#micMeter"), meterBar = $("#micMeter i");
+  let listening = null;
+  function stopListening() {
+    if (!listening) return;
+    const l = listening; listening = null;
+    cancelAnimationFrame(l.raf);
+    l.stream && l.stream.getTracks().forEach((t) => t.stop());
+    l.ac.close().catch(() => {});
+    window.Music.duck(false);
+    meter.classList.remove("on");
+    candles.forEach((c) => c.style.removeProperty("--blow"));
+  }
+  micBtn.addEventListener("click", async () => {
+    if (listening || blown) return;
+    // iOS: AudioContext aynan bosish paytida yaratilishi va resume qilinishi shart,
+    // aks holda getUserMedia'dan keyin u "uxlab" qoladi va faqat jimlik keladi.
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ac = new AC();
+    ac.resume();
+    listening = { ac, raf: 0, stream: null };
+    micBtn.textContent = "🎤 Ruxsat bering…";
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      btn.textContent = "🎤 Endi puflang…";
-      const ac = new (window.AudioContext || window.webkitAudioContext)();
-      const an = ac.createAnalyser(); an.fftSize = 512;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
+      if (!listening) { stream.getTracks().forEach((t) => t.stop()); return; }
+      listening.stream = stream;
+      await ac.resume();
+      window.Music.duck(true);
+      const an = ac.createAnalyser();
+      an.fftSize = 1024; an.smoothingTimeConstant = .35;
       ac.createMediaStreamSource(stream).connect(an);
-      const buf = new Uint8Array(an.frequencyBinCount);
-      let loud = 0;
-      (function listen() {
-        an.getByteTimeDomainData(buf);
-        let sum = 0;
-        for (const v of buf) sum += (v - 128) ** 2;
-        const rms = Math.sqrt(sum / buf.length);
-        loud = rms > 28 ? loud + 1 : Math.max(0, loud - 1);
-        if (loud > 6 || blown) { stream.getTracks().forEach((t) => t.stop()); ac.close(); blowOut(); return; }
-        requestAnimationFrame(listen);
-      })();
+      const freq = new Float32Array(an.frequencyBinCount);
+      const hzPerBin = ac.sampleRate / an.fftSize;
+      const lo = Math.max(1, Math.round(50 / hzPerBin)), hi = Math.round(500 / hzPerBin);
+      const mlo = hi, mhi = Math.round(3000 / hzPerBin);
+      const flo = Math.round(100 / hzPerBin), fhi = Math.round(4000 / hzPerBin);
+      // Jim bin'lar -Infinity dB qaytaradi — o'rtacha NaN bo'lmasligi uchun -140 dan pastga tushirmaymiz.
+      const band = (a, b) => { let s = 0; for (let i = a; i < b; i++) s += Math.max(-140, freq[i]); return s / (b - a); };
+      // Spektral tekislik (0..1): puflash — tekis keng shovqin (yuqori), gap/qo'shiq —
+      // garmonikalar (past). Shu bilan ovoz shamlarni o'chirmaydi.
+      const flatness = () => {
+        let lg = 0, ar = 0;
+        for (let i = flo; i < fhi; i++) { const db = Math.max(-140, freq[i]); lg += db; ar += Math.pow(10, db / 10); }
+        const n = fhi - flo;
+        return Math.pow(10, lg / n / 10) / (ar / n);
+      };
+
+      meter.classList.add("on");
+      micBtn.textContent = "🎤 Tinglayapman…";
+      const calib = []; let base = null, baseMid = null, blowMs = 0, last = performance.now(), started = last, hinted = false;
+      const NEED = [320, 700]; // har sham uchun kerakli puflash (ms, jamlanadi)
+
+      (function listen(now) {
+        if (!listening) return;
+        listening.raf = requestAnimationFrame(listen);
+        const dt = Math.min(64, now - last); last = now;
+        an.getFloatFrequencyData(freq);
+        const low = band(lo, hi), mid = band(mlo, mhi);
+        if (base === null) {
+          // Oqim hali kelmagan kadrlar (to'liq jimlik) bazani buzmasin; mediana —
+          // kalibrovka paytidagi tasodifiy shovqinga chidamli.
+          if (low > -135) calib.push([low, mid]);
+          if (calib.length >= 24) {
+            const med = (k) => calib.map((v) => v[k]).sort((a, b) => a - b)[calib.length >> 1];
+            base = med(0); baseMid = med(1);
+            micBtn.textContent = "🌬️ Endi puflang!";
+          }
+          return;
+        }
+        // Kuch: past chastota bazadan qancha oshdi (o'rta chastota ham oshishi —
+        // bu keng shovqin, ya'ni gap/qo'shiq emas, puflash).
+        const lift = low - base, liftMid = mid - baseMid;
+        const flat = flatness();
+        const strength = flat > .18 ? Math.max(0, Math.min(1, (lift - 8) / 18)) : 0;
+        const blowing = lift > 14 && liftMid > 10 && flat > .18;
+        meterBar.style.transform = `scaleX(${Math.max(.04, strength)})`;
+        meter.classList.toggle("hot", blowing);
+        candles.forEach((c) => { if (!c.classList.contains("out")) c.style.setProperty("--blow", strength.toFixed(2)); });
+
+        if (blowing) blowMs += dt; else blowMs = Math.max(0, blowMs - dt * .3);
+        NEED.forEach((ms, i) => { if (blowMs >= ms && candles[i] && !candles[i].classList.contains("out")) candles[i].classList.add("out"); });
+        if (blowMs >= NEED[NEED.length - 1]) { blowOut(); return; }
+
+        if (!hinted && now - started > 9000) {
+          hinted = true;
+          micBtn.textContent = "💨 Kuchliroq, mikrofonga yaqin puflang";
+        }
+      })(last);
     } catch {
-      btn.textContent = "Mikrofon yo'q — tugmani bos";
-      btn.disabled = true;
+      stopListening();
+      micBtn.textContent = "Mikrofon ochilmadi — tugmani bos";
+      micBtn.disabled = true;
     }
   });
 
   // ── Mushaklar ────────────────────────────────────────
   const fw = $("#fireworks"), fctx = fw.getContext("2d");
+  // Telefonda 1x piksel: to'liq ekranli "lighter" kompozitsiya 2–3x da juda og'ir.
+  const FDPR = mobile ? 1 : Math.min(DPR, 1.5);
   let rockets = [], sparks = [], fwOn = false, fwVisible = false;
-  function sizeFw() { fw.width = fw.clientWidth * DPR; fw.height = fw.clientHeight * DPR; }
+  function sizeFw() { fw.width = fw.clientWidth * FDPR; fw.height = fw.clientHeight * FDPR; }
   function launch() {
     rockets.push({ x: fw.width * (.15 + Math.random() * .7), y: fw.height, vy: -(fw.height / 60) * (.9 + Math.random() * .3), ty: fw.height * (.12 + Math.random() * .35), c: COLORS[Math.floor(Math.random() * 5)] });
   }
@@ -382,8 +476,8 @@
       let vx, vy;
       if (heart) { // yurak shakli
         vx = 16 * Math.sin(a) ** 3; vy = -(13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a));
-        vx *= .32 * DPR; vy *= .32 * DPR;
-      } else { const s = (Math.random() * 4 + 2) * DPR; vx = Math.cos(a) * s; vy = Math.sin(a) * s; }
+        vx *= .32 * FDPR; vy *= .32 * FDPR;
+      } else { const s = (Math.random() * 4 + 2) * FDPR; vx = Math.cos(a) * s; vy = Math.sin(a) * s; }
       sparks.push({ x: r.x, y: r.y, vx, vy, l: 1, c: Math.random() < .2 ? "#fff" : r.c });
     }
   }
@@ -397,14 +491,14 @@
     if (Math.random() < .045) launch();
     rockets = rockets.filter((r) => {
       r.y += r.vy; r.vy *= .985;
-      fctx.fillStyle = r.c; fctx.beginPath(); fctx.arc(r.x, r.y, 2.4 * DPR, 0, 7); fctx.fill();
+      fctx.fillStyle = r.c; fctx.fillRect(r.x - 2 * FDPR, r.y - 2 * FDPR, 4 * FDPR, 4 * FDPR);
       if (r.y <= r.ty || r.vy > -1) { explode(r); return false; }
       return true;
     });
     sparks = sparks.filter((s) => {
-      s.x += s.vx; s.y += s.vy; s.vy += .05 * DPR; s.vx *= .985; s.vy *= .985; s.l -= .012;
+      s.x += s.vx; s.y += s.vy; s.vy += .05 * FDPR; s.vx *= .985; s.vy *= .985; s.l -= .012;
       fctx.globalAlpha = Math.max(0, s.l); fctx.fillStyle = s.c;
-      fctx.beginPath(); fctx.arc(s.x, s.y, 1.8 * DPR, 0, 7); fctx.fill();
+      fctx.fillRect(s.x - 1.5 * FDPR, s.y - 1.5 * FDPR, 3 * FDPR, 3 * FDPR);
       return s.l > 0;
     });
     fctx.globalAlpha = 1;
@@ -421,7 +515,7 @@
   }, { threshold: .3 }).observe(fw);
   fw.addEventListener("click", (e) => {
     const r = fw.getBoundingClientRect();
-    explode({ x: (e.clientX - r.left) * DPR, y: (e.clientY - r.top) * DPR, c: COLORS[Math.floor(Math.random() * 5)] });
+    explode({ x: (e.clientX - r.left) * FDPR, y: (e.clientY - r.top) * FDPR, c: COLORS[Math.floor(Math.random() * 5)] });
   });
 
   $("#replayBtn").addEventListener("click", () => {
@@ -429,6 +523,7 @@
     blown = false;
     candles.forEach((c) => c.classList.remove("out"));
     $("#blowBtn").disabled = false; $("#micBtn").disabled = false;
+    stopListening();
     $("#micBtn").textContent = "🎤 Puflab o'chir";
     $("#cakeLead").textContent = "Ko'zingni yum, orzu qil va shamlarni o'chir 🕯️";
     scrollTo({ top: 0, behavior: "smooth" });
