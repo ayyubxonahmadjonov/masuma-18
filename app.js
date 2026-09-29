@@ -228,7 +228,6 @@
     gsap.from("#hero .hero-l1 .ch", { opacity: 0, y: 40, rotateX: -90, stagger: .025, duration: .8, delay: .9, ease: "back.out(1.7)" });
     gsap.from("#hero .name", { opacity: 0, scale: .4, filter: "blur(20px)", duration: 1.4, delay: 1.6, ease: "elastic.out(1, .6)" });
     gsap.from("#hero .sub", { opacity: 0, y: 20, duration: 1, delay: 2.4 });
-    gsap.from(".scroll-hint", { opacity: 0, duration: 1, delay: 3 });
     setupScroll();
   }
 
@@ -435,6 +434,12 @@
     scrollTo({ top: 0, behavior: "smooth" });
     setTimeout(() => { for (const p of parts) { p.x = Math.random() * num.width; p.y = num.height + Math.random() * 200; p.d = Math.random() * 40; } sideCannons(1500); }, 900);
   });
+
+  // ── "Pastga suring" ──────────────────────────────────
+  const hint = $("#scrollHint");
+  setTimeout(() => hint.classList.add("in"), 2600);
+  hint.addEventListener("click", () => $("#gallery").scrollIntoView({ behavior: "smooth" }));
+  addEventListener("scroll", () => hint.classList.toggle("gone", scrollY > innerHeight * .25), { passive: true });
 
   // ── Scroll animatsiyalari ────────────────────────────
   function setupScroll() {
